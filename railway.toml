@@ -1,0 +1,2 @@
+[deploy]
+startCommand = "python bot-1.py"
