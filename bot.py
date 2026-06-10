@@ -7,19 +7,25 @@ from telegram.ext import (
     ContextTypes, MessageHandler, filters
 )
 from tavily import TavilyClient
-import google.generativeai as genai
+from groq import Groq
 
 # ─── CONFIG ───────────────────────────────────────────────
 TELEGRAM_TOKEN = os.environ["TELEGRAM_BOT_TOKEN"]
-GEMINI_API_KEY = os.environ["GEMINI_API_KEY"]
+GROQ_API_KEY = os.environ["GROQ_API_KEY"]
 TAVILY_API_KEY = os.environ["TAVILY_API_KEY"]
 
-genai.configure(api_key=GEMINI_API_KEY)
 tavily = TavilyClient(api_key=TAVILY_API_KEY)
-model = genai.GenerativeModel("gemini-2.0-flash")
+groq_client = Groq(api_key=GROQ_API_KEY)
+
+def ask_ai(prompt: str) -> str:
+    response = groq_client.chat.completions.create(
+        model="llama-3.3-70b-versatile",
+        messages=[{"role": "user", "content": prompt}]
+    )
+    return response.choices[0].message.content.strip()
 
 # ─── USER STATE ───────────────────────────────────────────
-user_sessions = {}  # {user_id: {"topics": [...], "search_results": "..."}}
+user_sessions = {}
 
 # ─── SEARCH ───────────────────────────────────────────────
 def search_crypto_news():
@@ -56,14 +62,11 @@ JSON formatında cavab ver, başqa heç nə yazma:
     "risk": "Aşağı/Orta/Yüksək",
     "viral": 8,
     "w2e": 9
-  }},
-  ...
+  }}
 ]
 Tam 10 mövzu olsun. Yalnız JSON qaytır."""
 
-    response = model.generate_content(prompt)
-    text = response.text.strip()
-    # JSON-u təmizlə
+    text = ask_ai(prompt)
     if "```" in text:
         text = text.split("```")[1]
         if text.startswith("json"):
@@ -89,8 +92,7 @@ Aşağıdakı tələblərə uyğun məqalə yaz:
 
 Birbaşa məqaləni yaz, izahat vermə."""
 
-    response = model.generate_content(prompt)
-    return response.text.strip()
+    return ask_ai(prompt)
 
 # ─── SOCIAL POSTS ─────────────────────────────────────────
 def write_social_posts(topic: dict, article: str) -> str:
@@ -111,8 +113,7 @@ Format:
 
 Azərbaycan dilində yaz."""
 
-    response = model.generate_content(prompt)
-    return response.text.strip()
+    return ask_ai(prompt)
 
 # ─── HANDLERS ─────────────────────────────────────────────
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -140,22 +141,18 @@ async def analyze(update: Update, context: ContextTypes.DEFAULT_TYPE):
     msg = await update.message.reply_text("🔍 Bazar araşdırılır... (20-30 saniyə)")
 
     try:
-        # Search
         await msg.edit_text("🌐 Son xəbərlər yüklənir...")
         search_data = await asyncio.get_event_loop().run_in_executor(
             None, search_crypto_news
         )
 
-        # Analyze
-        await msg.edit_text("🧠 Gemini analiz edir...")
+        await msg.edit_text("🧠 AI analiz edir...")
         topics = await asyncio.get_event_loop().run_in_executor(
             None, analyze_topics, search_data
         )
 
-        # Save session
         user_sessions[user_id] = {"topics": topics, "search_data": search_data}
 
-        # Format output
         letters = ["A", "B", "C", "D", "E", "F", "G", "H", "I", "J"]
         text = "📊 *İyun 2026 — TOP 10 KRİPTO MÖVZU*\n\n"
 
@@ -171,7 +168,6 @@ async def analyze(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
         text += "👇 *Hansı mövzunu seçirsiniz?*"
 
-        # Keyboard
         keyboard = []
         row = []
         for i, t in enumerate(topics[:10]):
@@ -209,23 +205,19 @@ async def topic_selected(update: Update, context: ContextTypes.DEFAULT_TYPE):
     )
 
     try:
-        # Write article
         article = await asyncio.get_event_loop().run_in_executor(
             None, write_article, topic
         )
 
-        # Write social posts
         social = await asyncio.get_event_loop().run_in_executor(
             None, write_social_posts, topic, article
         )
 
-        # Send article
         await query.message.reply_text(
             f"📝 *MƏQALƏ*\n\n{article}",
             parse_mode="Markdown"
         )
 
-        # Send social posts
         await query.message.reply_text(
             f"📲 *SOSIAL MEDIA POSTLARI*\n\n{social}",
             parse_mode="Markdown"
@@ -252,3 +244,4 @@ def main():
 
 if __name__ == "__main__":
     main()
+    
